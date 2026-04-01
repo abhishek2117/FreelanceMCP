@@ -84,8 +84,10 @@ except ImportError as e:
     ServerCapabilities = None
     ResourceTemplateManager = None
 
-# Load environment variables
-load_dotenv()
+# Load environment variables (fallback for local dev; Claude Desktop injects env directly)
+_app_env = os.getenv("APP_ENV")
+_env_file = f".env.{_app_env}" if _app_env else ".env"
+load_dotenv(_env_file)
 
 # Initialize the MCP server (without authentication for now - Claude Desktop handles this)
 mcp = FastMCP(
@@ -830,12 +832,146 @@ def analyze_profile_fit(profile_data: Dict[str, Any], gig_id: str) -> Dict[str, 
 
 
 @mcp.tool()
-async def generate_proposal(gig_id: str, user_profile: Dict[str, Any], 
+async def generate_and_bid(
+    project_id: str,
+    freelancer_name: str,
+    skills: List[str],
+    years_experience: int = 3,
+    bid_amount: Optional[float] = None,
+    delivery_days: int = 7,
+    tone: str = "professional",
+    submit_bid: bool = False,
+    ctx: Context = None
+) -> Dict[str, Any]:
+    """
+    Fetch full project details, generate a human-like AI proposal, and optionally submit the bid.
+
+    Args:
+        project_id: Freelancer.com project ID (e.g. 'freelancer_123456')
+        freelancer_name: Your name to personalise the proposal
+        skills: Your relevant skills
+        years_experience: Years of experience to highlight
+        bid_amount: Amount to bid (if None, uses project avg bid)
+        delivery_days: Estimated days to deliver
+        tone: Proposal tone — professional | friendly | confident
+        submit_bid: True = actually submit bid, False = generate draft only
+    """
+    if not llm:
+        return {"error": "GROQ_API_KEY not set — AI proposal generation unavailable"}
+
+    if not REAL_API_AVAILABLE:
+        return {"error": "Real API client not available"}
+
+    from freelance_api_clients import FreelancerAPIClient
+
+    client = FreelancerAPIClient()
+    if not client.authenticate():
+        return {"error": "Freelancer.com authentication failed — check FREELANCER_OAUTH_TOKEN"}
+
+    # ── Step 1: Fetch full project details ───────────────────────────────────
+    if ctx:
+        await ctx.info(f"Fetching full project details for {project_id}…")
+
+    details = await client.get_project_details(project_id)
+    if "error" in details:
+        return {"error": f"Could not fetch project details: {details['error']}"}
+
+    title       = details["title"]
+    description = details["description"]
+    proj_skills = details["skills"]
+    budget_min  = details.get("budget_min", 0)
+    budget_max  = details.get("budget_max", 0)
+    avg_bid     = details.get("avg_bid", 0)
+    currency    = details.get("currency", "USD")
+    bids_count  = details.get("bids_count", 0)
+    client_info = details.get("client", {})
+    url         = details["url"]
+
+    final_bid = bid_amount or (avg_bid * 0.9 if avg_bid else budget_min)
+
+    # ── Step 2: Generate AI proposal ─────────────────────────────────────────
+    if ctx:
+        await ctx.info("Generating AI proposal with ChatGroq…")
+
+    prompt_text = f"""You are {freelancer_name}, a skilled freelancer. Write a compelling {tone} proposal for this project.
+
+PROJECT TITLE: {title}
+
+FULL REQUIREMENTS:
+{description}
+
+SKILLS NEEDED: {', '.join(proj_skills)}
+BUDGET: {currency} {budget_min}–{budget_max}
+CURRENT BIDS: {bids_count} (avg: {currency} {avg_bid:.0f})
+
+YOUR PROFILE:
+- Name: {freelancer_name}
+- Skills: {', '.join(skills)}
+- Experience: {years_experience} years
+- Proposed bid: {currency} {final_bid:.0f}
+- Delivery: {delivery_days} days
+
+Write a proposal that:
+1. Opens with a personalised line showing you READ the project carefully
+2. Explains your relevant experience with this exact type of work
+3. Briefly describes your approach/methodology for THIS project
+4. States your bid amount and timeline clearly
+5. Closes with a confident call to action — invite them to chat
+
+IMPORTANT: Sound like a real human, not a bot. No generic phrases like "I am writing to apply". Be specific about their project. Keep it 200–300 words."""
+
+    try:
+        response = llm.invoke(prompt_text)
+        proposal_text = response.content
+    except Exception as e:
+        return {"error": f"AI proposal generation failed: {e}"}
+
+    result = {
+        "project_id": project_id,
+        "title": title,
+        "url": url,
+        "client": client_info,
+        "budget": f"{currency} {budget_min}–{budget_max}",
+        "current_bids": bids_count,
+        "avg_competing_bid": f"{currency} {avg_bid:.0f}",
+        "your_bid": f"{currency} {final_bid:.0f}",
+        "delivery_days": delivery_days,
+        "proposal": proposal_text,
+        "bid_submitted": False,
+    }
+
+    # ── Step 3: Submit bid (only if approved scope + submit_bid=True) ─────────
+    if submit_bid:
+        if ctx:
+            await ctx.info(f"Submitting bid of {currency} {final_bid:.0f}…")
+
+        bid_result = await client.place_bid(
+            project_id=project_id,
+            amount=final_bid,
+            period=delivery_days,
+            description=proposal_text,
+        )
+
+        if bid_result.get("success"):
+            result["bid_submitted"] = True
+            result["bid_id"] = bid_result.get("bid_id")
+            result["bid_status"] = bid_result.get("status")
+        else:
+            result["bid_error"] = bid_result.get("error")
+            result["note"] = "Proposal generated but bid submission failed. This usually means fln:project_manage scope is still pending approval."
+    else:
+        result["note"] = "Draft only — set submit_bid=True to actually place the bid on Freelancer.com"
+
+    return result
+
+
+@mcp.tool()
+async def generate_proposal(gig_id: str, user_profile: Dict[str, Any],
                           tone: str = "professional", include_portfolio: bool = True,
                           custom_message: str = "", ctx: Context = None) -> Dict[str, Any]:
     """
     Generate a personalized proposal for a specific gig using Langchain ChatGroq
-    
+
     Args:
         gig_id: ID of the gig to generate proposal for
         user_profile: User profile information

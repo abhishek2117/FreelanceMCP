@@ -19,6 +19,14 @@ Features:
 import asyncio
 import os
 import time
+from pathlib import Path
+from dotenv import load_dotenv
+
+# Load env file based on APP_ENV (e.g. APP_ENV=dev loads .env.dev)
+_app_env = os.getenv("APP_ENV")
+_env_file = f".env.{_app_env}" if _app_env else ".env"
+if Path(_env_file).exists():
+    load_dotenv(_env_file, override=True)
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from datetime import datetime, timedelta
@@ -71,12 +79,19 @@ class NormalizedGig:
             "title": self.title,
             "description": self.description,
             "budget": self.budget,
+            "budget_min": self.budget_min,
+            "budget_max": self.budget_max,
+            "hourly_rate": self.hourly_rate,
+            "project_type": self.project_type,
             "skills_required": self.skills_required,
             "match_score": self.match_score,
             "proposals_count": self.proposals_count,
             "client_rating": self.client_rating,
+            "client_reviews": self.client_reviews,
             "posted_date": self.posted_date,
-            "url": self.url
+            "url": self.url,
+            "remote_ok": self.remote_ok,
+            "location": self.location,
         }
 
 
@@ -456,7 +471,7 @@ class UpworkAPIClient(BaseAPIClient):
                     id=f"upwork_{job_id}",
                     platform="upwork",
                     title=title,
-                    description=description[:500],  # Truncate long descriptions
+                    description=description,
                     budget=budget_str,
                     skills_required=skills,
                     match_score=round(match_score, 2),
@@ -677,7 +692,7 @@ class FreelancerAPIClient(BaseAPIClient):
                     id=f"freelancer_{project_id}",
                     platform="freelancer",
                     title=title,
-                    description=description[:500],
+                    description=description,
                     budget=budget_str,
                     skills_required=skills,
                     match_score=round(match_score, 2),
@@ -699,6 +714,142 @@ class FreelancerAPIClient(BaseAPIClient):
             print(f"❌ Freelancer.com: Error parsing response: {e}")
 
         return gigs
+
+    async def get_project_details(self, project_id: str) -> Dict[str, Any]:
+        """
+        Fetch full project details by Freelancer.com project ID.
+        Returns complete description, attachments, skills, client info.
+
+        Args:
+            project_id: Numeric Freelancer.com project ID (without 'freelancer_' prefix)
+
+        Returns:
+            Full project details dict
+        """
+        if not self.authenticate():
+            return {"error": "Not authenticated"}
+
+        await self._rate_limit()
+
+        # Strip 'freelancer_' prefix if present
+        pid = project_id.replace("freelancer_", "")
+        endpoint = f"{self.API_BASE_URL}/projects/0.1/projects/{pid}/"
+        params = {
+            "full_description": "true",
+            "job_details": "true",
+            "user_details": "true",
+            "attachment_details": "true",
+        }
+        headers = {"Freelancer-OAuth-V1": self.oauth_token}
+
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.get(endpoint, params=params, headers=headers) as resp:
+                    if resp.status == 401:
+                        return {"error": "Authentication failed — scope may be pending approval"}
+                    if resp.status != 200:
+                        return {"error": f"API error {resp.status}: {await resp.text()}"}
+
+                    data = await resp.json()
+                    project = data.get("result", {})
+
+                    budget = project.get("budget", {})
+                    currency = budget.get("currency", {}).get("code", "USD")
+                    jobs = project.get("jobs", [])
+                    owner = project.get("owner", {})
+                    bid_stats = project.get("bid_stats", {})
+                    seo_url = project.get("seo_url", "")
+
+                    return {
+                        "id": f"freelancer_{project.get('id')}",
+                        "title": project.get("title", ""),
+                        "description": project.get("description", ""),
+                        "skills": [j.get("name") for j in jobs],
+                        "budget_min": budget.get("minimum"),
+                        "budget_max": budget.get("maximum"),
+                        "currency": currency,
+                        "project_type": project.get("type", ""),
+                        "bids_count": bid_stats.get("bid_count", 0),
+                        "avg_bid": bid_stats.get("bid_avg", 0),
+                        "client": {
+                            "username": owner.get("username"),
+                            "rating": owner.get("reputation", {})
+                                          .get("entire_history", {})
+                                          .get("overall"),
+                            "reviews": owner.get("reputation", {})
+                                           .get("entire_history", {})
+                                           .get("reviews", 0),
+                            "country": owner.get("location", {}).get("country", {}).get("name"),
+                        },
+                        "url": f"https://www.freelancer.com/projects/{seo_url}" if seo_url
+                               else f"https://www.freelancer.com/projects/{pid}",
+                        "posted_date": project.get("time_submitted"),
+                    }
+
+        except aiohttp.ClientError as e:
+            return {"error": f"Network error: {e}"}
+
+    async def place_bid(self, project_id: str, amount: float, period: int,
+                        milestone_percentage: int = 100,
+                        description: str = "") -> Dict[str, Any]:
+        """
+        Submit a bid on a Freelancer.com project.
+
+        Requires fln:project_manage scope (pending approval).
+
+        Args:
+            project_id: Numeric project ID (without 'freelancer_' prefix)
+            amount: Bid amount in project currency
+            period: Estimated days to complete
+            milestone_percentage: % of payment as initial milestone (default 100)
+            description: Cover letter / proposal text
+
+        Returns:
+            Bid submission result
+        """
+        if not self.authenticate():
+            return {"error": "Not authenticated"}
+
+        await self._rate_limit()
+
+        pid = int(project_id.replace("freelancer_", ""))
+        endpoint = f"{self.API_BASE_URL}/projects/0.1/bids/"
+        headers = {
+            "Freelancer-OAuth-V1": self.oauth_token,
+            "Content-Type": "application/json",
+        }
+        payload = {
+            "project_id": pid,
+            "bidder_id": None,  # resolved server-side from token
+            "amount": amount,
+            "period": period,
+            "milestone_percentage": milestone_percentage,
+            "description": description,
+        }
+
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.post(endpoint, json=payload, headers=headers) as resp:
+                    data = await resp.json()
+                    if resp.status == 401:
+                        return {
+                            "error": "Authentication failed",
+                            "detail": "fln:project_manage scope may still be pending approval",
+                        }
+                    if resp.status in (200, 201):
+                        bid = data.get("result", {})
+                        return {
+                            "success": True,
+                            "bid_id": bid.get("id"),
+                            "project_id": project_id,
+                            "amount": amount,
+                            "period": period,
+                            "status": bid.get("award_status", "active"),
+                        }
+                    return {"error": f"Bid failed ({resp.status}): {data}"}
+
+        except aiohttp.ClientError as e:
+            return {"error": f"Network error: {e}"}
 
 
 # ============================================================================

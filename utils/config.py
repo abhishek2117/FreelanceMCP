@@ -123,7 +123,7 @@ class Config:
         }
 
 
-def load_config(env_file: str = ".env") -> Config:
+def load_config(env_file: str = ".env.dev") -> Config:
     """
     Load configuration from environment variables
 
