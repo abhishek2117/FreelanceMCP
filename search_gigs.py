@@ -517,7 +517,7 @@ async def auto_bid_gig(client: FreelancerAPIClient, gig) -> dict:
 
     # 3. Generate AI proposal
     prompt_text = f"""
-You are {name}, a senior full-stack and mobile engineer with {experience}+ years experience.
+You are {name}, a senior full-stack & mobile engineer with {experience}+ years experience.
 
 Write a high-conversion Freelancer proposal.
 
@@ -527,35 +527,64 @@ PROJECT:
 REQUIREMENTS:
 {description}
 
-CLIENT CONTEXT:
+CLIENT CONTEXT (internal use only):
 Budget: {currency} {budget_min}-{budget_max}
 Current bids: {bids_count} (avg: {currency} {avg_bid:.0f})
 
 YOUR PROFILE:
-Skills: {', '.join(skills)}
+{name} – {experience}+ years full-stack & mobile engineer
 Your bid: {currency} {bid_amount:.0f}
 Timeline: {delivery_days} days
 
 ---
 
-INSTRUCTIONS (STRICT):
+STRICT RULES:
 
-- Write 180–220 words, under 1400 characters
-- First line MUST prove you read the project (mention a specific feature/problem like payments, booking, IAP, etc.)
-- Do NOT use generic openings ("Hi", "I am excited", etc.)
-- Write like a senior engineer, not a marketer
-- Include 1–2 concrete technical decisions (stack, architecture, or approach)
-- Focus on solving the client’s problem, not your biography
-- Use clean formatting with short sections (Approach, Features, Deliverables, etc.)
-- Avoid fluff, buzzwords, and emojis
-- Sound confident and direct (no begging tone)
-- End with a clear action (what happens next)
+- Length: 180–220 words AND under 1400 characters
+- First line MUST reference a specific feature/problem from the project
+- DO NOT use generic openings (Hi, Hello, I am excited, etc.)
+- Infer required technologies from the project description
+- ONLY mention skills/tech relevant to THIS project
+- If tech stack is not specified, suggest a modern stack briefly
+- Include 1–2 concrete technical details (implementation/approach)
+- Focus on solving the client’s problem, NOT your biography
+- Keep sentences short, clear, and direct
+- Avoid buzzwords, fluff, emojis, and repetition
+- Sound confident and professional (no begging tone)
+
+CLIENT CONTEXT USAGE:
+
+- Use budget and bid data ONLY to adjust tone, depth, and positioning
+- DO NOT mention budget, pricing range, or other bidders
+
+APP REFERENCE:
+
+- If relevant, include ONE real app reference
+- Prefer niche/domain-specific apps (B2B/SaaS tools)
+- Avoid overly popular apps (WhatsApp, Facebook, Amazon, Uber, etc.)
+- Use it naturally within a sentence (not as a list)
+
+PAST EXPERIENCE:
+
+- Briefly mention one relevant past project (e.g., Rhythm)
+- Describe it in terms of features or problem solved
+- Keep it to 1–2 lines only
+- Do NOT over-explain or sound promotional
+
+STRUCTURE:
+
+1. Hook (project-specific understanding in first line)
+2. Approach (technical solution)
+3. Key features / fixes
+4. Deliverables or outcome
+5. Short credibility (Rhythm mention if relevant)
+6. Clear next step
 
 STYLE:
 
-- Natural, human, slightly conversational
-- Concise but impactful
-- Each line should add value
+- Human, natural, slightly conversational
+- Assume client is technical and has seen many generic bids
+- Every sentence must add value
 
 OUTPUT:
 Only the final proposal text. No explanations.
