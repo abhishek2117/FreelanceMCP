@@ -541,7 +541,15 @@ Only the final proposal text. No explanations.
 
     try:
         response = llm.invoke(prompt_text)
-        proposal = response.content
+        content = response.content
+        # Some models (e.g. Gemini) return a list of content blocks instead of a plain string
+        if isinstance(content, list):
+            proposal = " ".join(
+                block.get("text", "") if isinstance(block, dict) else str(block)
+                for block in content
+            ).strip()
+        else:
+            proposal = str(content).strip()
     except Exception as e:
         return {"success": False, "error": f"AI generation failed: {e}"}
 
