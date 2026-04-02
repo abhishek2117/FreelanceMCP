@@ -527,6 +527,7 @@ class FreelancerAPIClient(BaseAPIClient):
         super().__init__(cache_ttl)
         self.oauth_token = oauth_token or os.getenv("FREELANCER_OAUTH_TOKEN", "")
         self.rate_limit_delay = 1.0
+        self._user_id: int | None = None  # cached after first call to get_self_user_id()
 
     def authenticate(self) -> bool:
         """Check if we have valid credentials"""
@@ -534,6 +535,27 @@ class FreelancerAPIClient(BaseAPIClient):
             print("⚠️ Freelancer.com: No OAuth token configured. Set FREELANCER_OAUTH_TOKEN environment variable.")
             return False
         return True
+
+    async def get_self_user_id(self) -> int | None:
+        """Fetch and cache the authenticated user's Freelancer.com user ID."""
+        if self._user_id:
+            return self._user_id
+        headers = {"Freelancer-OAuth-V1": self.oauth_token}
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.get(
+                    f"{self.API_BASE_URL}/users/0.1/self/",
+                    headers=headers,
+                    timeout=aiohttp.ClientTimeout(total=10),
+                ) as resp:
+                    data = await resp.json()
+                    uid = data.get("result", {}).get("id")
+                    if uid:
+                        self._user_id = int(uid)
+                        return self._user_id
+        except Exception as e:
+            print(f"⚠️ Could not fetch self user ID: {e}")
+        return None
 
     @retry(
         stop=stop_after_attempt(3),
@@ -812,6 +834,11 @@ class FreelancerAPIClient(BaseAPIClient):
 
         await self._rate_limit()
 
+        # Resolve bidder_id from the token if not already cached
+        bidder_id = await self.get_self_user_id()
+        if not bidder_id:
+            return {"error": "Could not resolve bidder_id — check FREELANCER_OAUTH_TOKEN"}
+
         pid = int(project_id.replace("freelancer_", ""))
         endpoint = f"{self.API_BASE_URL}/projects/0.1/bids/"
         headers = {
@@ -820,7 +847,7 @@ class FreelancerAPIClient(BaseAPIClient):
         }
         payload = {
             "project_id": pid,
-            "bidder_id": None,  # resolved server-side from token
+            "bidder_id": bidder_id,
             "amount": amount,
             "period": period,
             "milestone_percentage": milestone_percentage,

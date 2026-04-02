@@ -221,7 +221,7 @@ class AutoBiddingAgent:
             groq_key = os.getenv("GROQ_API_KEY")
 
             if groq_key:
-                llm = ChatGroq(groq_api_key=groq_key, model_name="mixtral-8x7b-32768")
+                llm = ChatGroq(groq_api_key=groq_key, model_name="llama-3.3-70b-versatile")
 
                 prompt = f"""
                 Generate a compelling, professional freelance proposal for this job:

@@ -106,7 +106,7 @@ A comprehensive freelance platform aggregator that helps users:
 try:
     llm = ChatGroq(
         groq_api_key=os.getenv("GROQ_API_KEY", ""),
-        model_name="mixtral-8x7b-32768",
+        model_name="llama-3.3-70b-versatile",
         temperature=0.7
     )
 except Exception as e:

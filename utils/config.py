@@ -50,7 +50,7 @@ class Config:
     allowed_origins: List[str] = field(default_factory=lambda: ["*"])
 
     # LLM settings
-    llm_model: str = "mixtral-8x7b-32768"
+    llm_model: str = "llama-3.3-70b-versatile"
     llm_temperature: float = 0.7
     llm_max_tokens: int = 2048
     llm_timeout: int = 30  # seconds
@@ -171,7 +171,7 @@ def load_config(env_file: str = ".env.dev") -> Config:
         rate_limit_requests=int(os.getenv('RATE_LIMIT_REQUESTS', '100')),
 
         # LLM settings
-        llm_model=os.getenv('LLM_MODEL', 'mixtral-8x7b-32768'),
+        llm_model=os.getenv('LLM_MODEL', 'llama-3.3-70b-versatile'),
         llm_temperature=float(os.getenv('LLM_TEMPERATURE', '0.7')),
 
         # Feature flags
