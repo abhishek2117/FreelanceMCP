@@ -471,7 +471,6 @@ async def auto_bid_gig(client: FreelancerAPIClient, gig) -> dict:
     experience    = int(os.getenv("AUTO_BID_EXPERIENCE", "3"))
     delivery_days = int(os.getenv("AUTO_BID_DELIVERY_DAYS", "7"))
     tone          = os.getenv("AUTO_BID_TONE", "professional")
-    strategy      = os.getenv("AUTO_BID_STRATEGY", "undercut")
 
     # 1. Fetch full project description
     details = await client.get_project_details(gig.id)
@@ -487,11 +486,34 @@ async def auto_bid_gig(client: FreelancerAPIClient, gig) -> dict:
     currency    = details.get("currency", "USD")
     bids_count  = details.get("bids_count", gig.proposals_count or 0)
 
-    # 2. Calculate bid amount
-    if strategy == "undercut" and avg_bid:
-        bid_amount = round(avg_bid * 0.9, 2)
+    # 2. Calculate bid amount (range-based percentage of budget_max)
+    # Ranges: AUTO_BID_RANGE_<N>=min_usd,max_usd,pct
+    # e.g. AUTO_BID_RANGE_1=0,250,95  → bid 95% of budget_max when budget is $0–$250
+    def _parse_ranges() -> list:
+        ranges = []
+        for key, val in os.environ.items():
+            if not key.startswith("AUTO_BID_RANGE_"):
+                continue
+            try:
+                parts = [p.strip() for p in val.split(",")]
+                rmin, rmax, pct = float(parts[0]), float(parts[1]), float(parts[2])
+                ranges.append((rmin, rmax, pct / 100.0))
+            except Exception:
+                pass
+        return sorted(ranges, key=lambda x: x[0])
+
+    _base = budget_max or budget_min or avg_bid or 0
+    _matched_pct = None
+    for _rmin, _rmax, _pct in _parse_ranges():
+        if _rmin <= _base <= _rmax:
+            _matched_pct = _pct
+            break
+
+    if _matched_pct is not None and _base:
+        bid_amount = round(_base * _matched_pct, 2)
     else:
-        bid_amount = budget_min or avg_bid or 50
+        _fallback_pct = float(os.getenv("AUTO_BID_FALLBACK_PCT", "90")) / 100.0
+        bid_amount = round(_base * _fallback_pct, 2) if _base else 50.0
 
     # 3. Generate AI proposal
     prompt_text = f"""
