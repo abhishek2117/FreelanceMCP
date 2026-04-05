@@ -37,7 +37,7 @@ _PROVIDER_DEFAULTS = {
     "mistral":   ("mistral-small-latest",     "MISTRAL_API_KEY"),
     "cerebras":  ("llama-3.3-70b",            "CEREBRAS_API_KEY"),
     "ollama":    ("llama3.2",                 ""),          # local, no key needed
-    "openai":    ("gpt-5.3",                  "OPENAI_API_KEY"),
+    "openai":    ("gpt-5.3-chat-latest",                  "OPENAI_API_KEY"),
 }
 
 
@@ -114,7 +114,7 @@ def choose_auto_bid_ai() -> None:
     print(f"  3) Mistral AI  - mistral-small-latest      ✅ free  (console.mistral.ai)")
     print(f"  4) Cerebras    - llama-3.3-70b             ✅ free  (cloud.cerebras.ai)")
     print(f"  5) Ollama      - llama3.2 (local)          ✅ free, no internet needed")
-    print(f"  6) OpenAI      - gpt-5.3                   💰 paid  (platform.openai.com)")
+    print(f"  6) OpenAI      - gpt-5.3-chat-latest                   💰 paid  (platform.openai.com)")
     print(f"  7) Keep current ({current_provider}: {current_model})")
 
     _choices = {
@@ -123,7 +123,7 @@ def choose_auto_bid_ai() -> None:
         "3": ("mistral", "mistral-small-latest"),
         "4": ("cerebras","llama-3.3-70b"),
         "5": ("ollama",  "llama3.2"),
-        "6": ("openai",  "gpt-5.3"),
+        "6": ("openai",  "gpt-5.3-chat-latest"),
     }
 
     choice = input(f"{CYAN}Enter choice (1-7): {RESET}").strip()
@@ -519,7 +519,7 @@ async def auto_bid_gig(client: FreelancerAPIClient, gig) -> dict:
     prompt_text = f"""
 You are {name}, a senior full-stack & mobile engineer with {experience}+ years experience.
 
-Write a high-conversion Freelancer proposal.
+Write a high-conversion Freelancer proposal in a CLEAN, STRUCTURED format.
 
 PROJECT:
 {title}
@@ -540,51 +540,59 @@ Timeline: {delivery_days} days
 
 STRICT RULES:
 
-- Length: 180–220 words AND under 1400 characters
-- First line MUST reference a specific feature/problem from the project
-- DO NOT use generic openings (Hi, Hello, I am excited, etc.)
-- Infer required technologies from the project description
-- ONLY mention skills/tech relevant to THIS project
-- If tech stack is not specified, suggest a modern stack briefly
-- Include 1–2 concrete technical details (implementation/approach)
-- Focus on solving the client’s problem, NOT your biography
-- Keep sentences short, clear, and direct
-- Avoid buzzwords, fluff, emojis, and repetition
-- Sound confident and professional (no begging tone)
+- Length: 170–220 words AND under 1400 characters
+- First paragraph MUST reference the client’s exact problem/use-case
+- DO NOT use generic or fluffy openings
+- Maintain a clean, structured format with sections (Approach, Features, etc.)
+- Keep sentences short, clear, and human
+- Include 1–2 concrete technical decisions (stack, architecture, tools)
+- Infer technologies from project description (do NOT list random skills)
+- Focus on solving the problem, not selling yourself
+- Avoid buzzwords, emojis, and repetition
 
-CLIENT CONTEXT USAGE:
+STRUCTURE (MANDATORY):
 
-- Use budget and bid data ONLY to adjust tone, depth, and positioning
-- DO NOT mention budget, pricing range, or other bidders
+Start with:
+Hi,
 
-APP REFERENCE:
+Then follow this exact flow:
 
-- If relevant, include ONE real app reference
-- Prefer niche/domain-specific apps (B2B/SaaS tools)
-- Avoid overly popular apps (WhatsApp, Facebook, Amazon, Uber, etc.)
-- Use it naturally within a sentence (not as a list)
+1. Intro paragraph  
+   - Who you are (1 line)  
+   - Show you understand THEIR problem  
+   - Position yourself as solution  
 
-PAST EXPERIENCE:
+2. 🔧 Approach  
+   - Clear technical approach (stack + reasoning)
 
-- Briefly mention one relevant past project (e.g., Rhythm)
-- Describe it in terms of features or problem solved
-- Keep it to 1–2 lines only
-- Do NOT over-explain or sound promotional
+3. ✅ Core Features  
+   - 4–6 bullet points aligned with project scope  
 
-STRUCTURE:
+4. ☁️ Reliability / Performance (or relevant section)  
+   - Key engineering decisions / edge cases  
 
-1. Hook (project-specific understanding in first line)
-2. Approach (technical solution)
-3. Key features / fixes
-4. Deliverables or outcome
-5. Short credibility (Rhythm mention if relevant)
-6. Clear next step
+5. 📦 Deliverables  
+   - What client gets (concise)
+
+6. 💡 Why Me  
+   - 1–2 lines max  
+   - Mention past relevant work (e.g., Rhythm) naturally  
+
+7. Ending  
+   - Ask ONE smart technical question OR next step  
+   - Avoid generic “let’s connect”
 
 STYLE:
 
-- Human, natural, slightly conversational
-- Assume client is technical and has seen many generic bids
-- Every sentence must add value
+- Professional but conversational
+- Structured but not robotic
+- Each section must add value
+- Assume client is technical
+
+CLIENT CONTEXT USAGE:
+
+- Use budget/bids ONLY to adjust tone
+- DO NOT mention budget or competitors
 
 OUTPUT:
 Only the final proposal text. No explanations.
