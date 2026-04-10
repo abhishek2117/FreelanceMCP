@@ -1,37 +1,39 @@
-# Docker Compose configuration for Freelance MCP Server
-version: '3.8'
+# Docker Compose — FreelanceMCP Web Dashboard
+version: "3.8"
 
 services:
-  # Main MCP Server
-  freelance-mcp:
+  freelance-dashboard:
     build:
       context: .
       dockerfile: Dockerfile
-    container_name: freelance-mcp-server
+    container_name: freelance-dashboard
     ports:
       - "8080:8080"
+    env_file:
+      - .env.dev # All secrets & config loaded from .env.dev
     environment:
-      # Environment variables (override in .env file)
-      - GROQ_API_KEY=${GROQ_API_KEY:-your_groq_api_key_here}
-      - OWNER_COUNTRY_CODE=${OWNER_COUNTRY_CODE:-1}
-      - OWNER_PHONE_NUMBER=${OWNER_PHONE_NUMBER:-5551234567}
-      - MCP_AUTH_TOKEN=${MCP_AUTH_TOKEN:-}
-      - LOG_LEVEL=${LOG_LEVEL:-INFO}
-      - DATABASE_URL=${DATABASE_URL:-sqlite:///data/freelance.db}
+      - APP_ENV=dev
+      # Runtime data file paths (inside the container → /app/data/)
+      - BIDS_JSON_PATH=/app/data/bids.json
+      - STATUS_JSON_PATH=/app/data/status.json
     volumes:
-      # Mount data directory for persistence
-      - ./data:/app/data
-      # Mount .env file
-      - ./.env:/app/.env:ro
+      # Persist bids.json & status.json across container restarts
+      - dashboard-data:/app/data
     restart: unless-stopped
     networks:
       - freelance-network
     healthcheck:
-      test: ["CMD", "python", "-c", "import sys; sys.exit(0)"]
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://localhost:8080/api/status')",
+        ]
       interval: 30s
       timeout: 10s
       retries: 3
-      start_period: 10s
+      start_period: 15s
 
   # Optional: Redis for caching (future enhancement)
   redis:
@@ -47,35 +49,32 @@ services:
     profiles:
       - with-cache
 
-  # Optional: PostgreSQL database (alternative to SQLite)
-  postgres:
-    image: postgres:15-alpine
-    container_name: freelance-postgres
-    environment:
-      - POSTGRES_USER=${POSTGRES_USER:-freelance}
-      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-freelance_password}
-      - POSTGRES_DB=${POSTGRES_DB:-freelance_db}
-    ports:
-      - "5432:5432"
-    volumes:
-      - postgres-data:/var/lib/postgresql/data
-    restart: unless-stopped
-    networks:
-      - freelance-network
-    profiles:
-      - with-postgres
-
 networks:
   freelance-network:
     driver: bridge
 
 volumes:
+  dashboard-data:
+    driver: local
   redis-data:
     driver: local
-  postgres-data:
-    driver: local
 
-# Usage:
+# ─────────────────────────────────────────────────────────────
+# Usage on AWS Lightsail (or any server):
+#
+#   # First deploy / after code changes:
+#   git pull
+#   docker compose up -d --build
+#
+#   # View live logs without blocking the terminal:
+#   docker compose logs -f
+#
+#   # Stop:
+#   docker compose down
+#
+#   # ✅ Close SSH terminal anytime — container keeps running
+#   # ✅ Server reboot — container auto-restarts (restart: unless-stopped)
+# ─────────────────────────────────────────────────────────────
 #
 # Basic startup:
 #   docker-compose up -d

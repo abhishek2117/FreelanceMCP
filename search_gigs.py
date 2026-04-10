@@ -7,8 +7,10 @@ Usage:
 """
 
 import asyncio
+import json
 import os
 import select
+import signal
 import smtplib
 import subprocess
 import sys
@@ -294,6 +296,53 @@ async def send_all_notifications(gig) -> None:
     await loop.run_in_executor(
         None, notify_email, title, budget, match, bids, url, skills
     )
+
+
+# ── Runtime data files ───────────────────────────────────────────────────────
+
+_BIDS_FILE   = Path(os.getenv("BIDS_JSON_PATH",   "bids.json"))
+_STATUS_FILE = Path(os.getenv("STATUS_JSON_PATH", "status.json"))
+
+
+def append_bid_to_json(bid_result: dict, gig) -> None:
+    """Append a placed-bid record to bids.json so the web dashboard can display it."""
+    record = {
+        "id":          bid_result.get("bid_id", ""),
+        "title":       bid_result.get("title", getattr(gig, "title", "")),
+        "url":         getattr(gig, "url", ""),
+        "platform":    getattr(gig, "platform", "freelancer"),
+        "bid_amount":  bid_result.get("bid_amount", 0),
+        "currency":    bid_result.get("currency", "USD"),
+        "status":      "success" if bid_result.get("success") else "failed",
+        "error":       bid_result.get("error", ""),
+        "ai_provider": bid_result.get("ai_provider", ""),
+        "ai_model":    bid_result.get("ai_model", ""),
+        "proposal":    bid_result.get("proposal", ""),
+        "timestamp":   datetime.now().isoformat(),
+    }
+    try:
+        existing: list = []
+        if _BIDS_FILE.exists():
+            try:
+                existing = json.loads(_BIDS_FILE.read_text(encoding="utf-8"))
+                if not isinstance(existing, list):
+                    existing = []
+            except Exception:
+                existing = []
+        existing.append(record)
+        _BIDS_FILE.write_text(json.dumps(existing, ensure_ascii=False, indent=2),
+                              encoding="utf-8")
+    except Exception as exc:
+        print(f"{YELLOW}  ⚠ Could not write bids.json: {exc}{RESET}")
+
+
+def write_status(running: bool, pid: int | None = None) -> None:
+    """Write process status to status.json for the web dashboard."""
+    try:
+        data = {"running": running, "pid": pid, "updated_at": datetime.now().isoformat()}
+        _STATUS_FILE.write_text(json.dumps(data), encoding="utf-8")
+    except Exception:
+        pass
 
 
 def timed_input(label: str, timeout: int = 10) -> str:
@@ -673,6 +722,7 @@ async def auto_poll(client: FreelancerAPIClient, criteria: SearchCriteria,
                                   f"ID: {bid_result.get('bid_id')}{RESET}")
                         else:
                             print(f"{RED}  ❌ Bid failed: {bid_result.get('error')}{RESET}")
+                        append_bid_to_json(bid_result, gig)
 
                 for gig in new_gigs:
                     print_gig("NEW", gig, new=True)
@@ -688,9 +738,84 @@ async def auto_poll(client: FreelancerAPIClient, criteria: SearchCriteria,
 
     except KeyboardInterrupt:
         print(f"\n\n{YELLOW}⏹  Auto-poll stopped.{RESET}")
+        write_status(False)
 
 
 async def main() -> None:
+    import argparse
+    parser = argparse.ArgumentParser(description="Freelancer.com Gig Search")
+    parser.add_argument("--headless", action="store_true",
+                        help="Run non-interactively using env-var config (for web dashboard)")
+    args, _ = parser.parse_known_args()
+
+    if args.headless:
+        await main_headless()
+    else:
+        await main_interactive()
+
+
+async def main_headless() -> None:
+    """Non-interactive mode driven entirely by environment variables.
+    Called by the web dashboard via: python search_gigs.py --headless
+    """
+    # Write PID so the dashboard can track us
+    write_status(True, pid=os.getpid())
+
+    # Register SIGTERM so the dashboard's stop button triggers a clean shutdown
+    def _handle_sigterm(signum, frame):
+        write_status(False)
+        sys.exit(0)
+
+    signal.signal(signal.SIGTERM, _handle_sigterm)
+
+    print_header()
+
+    client = FreelancerAPIClient()
+    if not client.authenticate():
+        print(f"{RED}❌ Authentication failed. Check FREELANCER_OAUTH_TOKEN in {_env_file}{RESET}")
+        write_status(False)
+        return
+
+    print(f"{GREEN}✅ Connected to Freelancer.com (headless){RESET}")
+
+    # Build criteria from env vars
+    raw_skills    = os.getenv("DEFAULT_SEARCH_SKILLS", _DEFAULT_SKILLS)
+    skills        = [s.strip() for s in raw_skills.split(",") if s.strip()]
+    min_budget    = float(os.getenv("AUTO_BID_MIN_BUDGET", "0") or "0") or None
+    max_budget    = float(os.getenv("AUTO_BID_MAX_BUDGET", "0") or "0") or None
+    interval      = int(os.getenv("AUTO_BID_INTERVAL", "60"))
+    limit_str     = os.getenv("AUTO_BID_SEARCH_LIMIT", "10")
+    limit         = int(limit_str) if limit_str.isdigit() else 10
+    min_match_pct = int(os.getenv("AUTO_BID_MIN_MATCH", "60"))
+    min_match     = min_match_pct / 100.0
+    auto_bid      = os.getenv("AUTO_BID_ENABLED", "false").lower() == "true"
+
+    criteria = SearchCriteria(
+        skills=skills,
+        min_budget=min_budget,
+        max_budget=max_budget,
+        project_type=None,
+        min_match_score=min_match,
+        limit=limit,
+    )
+
+    print(f"{CYAN}⚙  Skills: {len(skills)} | Interval: {interval}s | "
+          f"Auto-bid: {'ON' if auto_bid else 'OFF'}{RESET}")
+
+    print(f"\n{YELLOW}🔍 Initial search…{RESET}")
+    gigs = await client.search_gigs(criteria)
+    seen_ids = {g.id for g in gigs}
+    show_results(gigs)
+
+    try:
+        await auto_poll(client, criteria, interval=interval,
+                        seen_ids=seen_ids, auto_bid=auto_bid)
+    finally:
+        write_status(False)
+
+
+async def main_interactive() -> None:
+    """Original interactive (terminal) mode."""
     print_header()
 
     client = FreelancerAPIClient()

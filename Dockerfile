@@ -1,8 +1,8 @@
-# Dockerfile for Freelance MCP Server
+# Dockerfile for FreelanceMCP Web Dashboard
 # Multi-stage build for optimal image size
 
 # Stage 1: Builder
-FROM python:3.11-slim as builder
+FROM python:3.11-slim AS builder
 
 WORKDIR /app
 
@@ -22,31 +22,39 @@ WORKDIR /app
 
 # Copy Python dependencies from builder
 COPY --from=builder /root/.local /root/.local
-
-# Make sure scripts in .local are usable
 ENV PATH=/root/.local/bin:$PATH
 
-# Copy application files
+# Copy all application source files
 COPY freelance_server.py .
-COPY core/ ./core/
-COPY .env.example .env
+COPY search_gigs.py .
+COPY freelance_api_clients.py .
+COPY freelance_client.py .
+COPY automation.py .
+COPY ai_features.py .
+COPY web_ui.py .
+COPY core/        ./core/
+COPY utils/       ./utils/
+COPY database/    ./database/
+COPY mcp_extensions/ ./mcp_extensions/
+COPY dashboard/   ./dashboard/
 
-# Create data directory for SQLite (if using database)
+# Runtime data directory (bids.json / status.json written here)
 RUN mkdir -p /app/data
 
-# Set environment variables
+# Runtime flags
 ENV PYTHONUNBUFFERED=1
 ENV PYTHONDONTWRITEBYTECODE=1
+ENV APP_ENV=dev
 
-# Expose port (for SSE/HTTP modes)
+# Dashboard server port
 EXPOSE 8080
 
-# Health check
-HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
-    CMD python -c "import sys; sys.exit(0)"
+# Health check — verify the HTTP server is responding
+HEALTHCHECK --interval=30s --timeout=10s --start-period=15s --retries=3 \
+    CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:8080/api/status')"
 
-# Default command (can be overridden)
-CMD ["python", "freelance_server.py", "stdio"]
+# Start the web dashboard (serves UI + manages search_gigs.py subprocess)
+CMD ["python", "web_ui.py"]
 
 # Labels for metadata
 LABEL maintainer="Freelance MCP Team"

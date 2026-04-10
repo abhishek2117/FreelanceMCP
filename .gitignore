@@ -39,3 +39,7 @@ htmlcov/
 
 # Logs
 *.log
+
+# Runtime dashboard data
+bids.json
+status.json
